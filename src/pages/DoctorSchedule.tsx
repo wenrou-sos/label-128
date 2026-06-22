@@ -32,7 +32,8 @@ interface DaySchedule {
 }
 
 function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0];
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 function addDays(date: Date, days: number): Date {
@@ -47,8 +48,8 @@ function getDayName(date: Date): string {
 }
 
 function getDateLabel(dateStr: string): string {
-  const d = new Date(dateStr);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return `${month}/${day}`;
 }
 
 function aggregateShift(slots: TimeSlot[]): ShiftStatus {
@@ -86,20 +87,29 @@ export default function DoctorSchedule() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const weekDays = useMemo<Date[]>(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return Array.from({ length: 7 }, (_, i) => addDays(today, i));
-  }, []);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const weekDays: Date[] = Array.from({ length: 7 }, (_, i) => addDays(today, i));
 
   useEffect(() => {
-    if (!id) return;
+    if (!id) {
+      setError('缺少医生ID');
+      setLoading(false);
+      return;
+    }
     const doctorId = Number(id);
-    if (isNaN(doctorId)) return;
+    if (isNaN(doctorId)) {
+      setError('医生ID无效');
+      setLoading(false);
+      return;
+    }
 
+    let cancelled = false;
     (async () => {
       try {
         setLoading(true);
+        setError(null);
         const [doctorData, clinics, depts, allSlots] = await Promise.all([
           api.getDoctors({}).then((list) => list.find((d) => d.id === doctorId) || null),
           api.getClinics(),
@@ -107,8 +117,11 @@ export default function DoctorSchedule() {
           api.getDoctorTimeSlots(doctorId),
         ]);
 
+        if (cancelled) return;
+
         if (!doctorData) {
           setError('医生不存在');
+          setLoading(false);
           return;
         }
 
@@ -117,11 +130,16 @@ export default function DoctorSchedule() {
         setDepartment(depts.find((d) => d.id === doctorData.departmentId) || null);
         setTimeSlots(allSlots);
       } catch (e) {
+        if (cancelled) return;
         setError(e instanceof Error ? e.message : '加载失败');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   const schedule = useMemo<DaySchedule[]>(() => {

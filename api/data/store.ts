@@ -45,7 +45,8 @@ class DataStore {
 
   private getDateStr(date?: Date): string {
     const d = date ?? new Date()
-    return d.toISOString().split('T')[0].replace(/-/g, '')
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
   }
 
   generateAppointmentNo(): string {

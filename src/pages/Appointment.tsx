@@ -49,18 +49,21 @@ const deptIconMap: Record<string, typeof Stethoscope> = {
 };
 
 function formatDate(dateStr: string) {
-  const d = new Date(dateStr);
-  const wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()];
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${wd}`;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()];
+  return `${m}月${d}日 ${wd}`;
 }
 
 function getNextDates(count: number) {
   const result: { key: string; label: string }[] = [];
   const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, '0');
   for (let i = 0; i < count; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
-    const key = d.toISOString().split('T')[0];
+    const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     const label = i === 0 ? '今日' : i === 1 ? '明日' : formatDate(key);
     result.push({ key, label });
   }

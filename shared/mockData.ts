@@ -138,7 +138,8 @@ export const doctors: Doctor[] = [
 ];
 
 function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0];
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 function addDays(date: Date, days: number): Date {
