@@ -6,6 +6,7 @@ import Queue from "@/pages/Queue";
 import CheckIn from "@/pages/CheckIn";
 import Doctors from "@/pages/Doctors";
 import DoctorSchedule from "@/pages/DoctorSchedule";
+import HealthRecord from "@/pages/HealthRecord";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/checkin" element={<CheckIn />} />
         <Route path="/doctors" element={<Doctors />} />
         <Route path="/doctors/:id" element={<DoctorSchedule />} />
+        <Route path="/health" element={<HealthRecord />} />
       </Routes>
     </Router>
   );

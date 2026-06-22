@@ -109,6 +109,24 @@ export interface EnrichedRegistration extends Registration {
   appointment: Appointment | undefined
 }
 
+export interface MedicalRecord {
+  date: string
+  departmentName: string
+  doctorName: string
+  doctorTitle: string
+  chiefComplaint: string
+  symptoms: string[]
+  status: 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'waiting' | 'visiting' | 'skipped'
+  isEmergency: boolean
+  registrationNo?: string
+  appointmentNo?: string
+}
+
+export interface PetHealthProfile {
+  pet: Pet
+  medicalRecords: MedicalRecord[]
+}
+
 export const api = {
   getClinics: (): Promise<Clinic[]> => {
     return request<Clinic[]>('/clinics')
@@ -216,6 +234,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     })
+  },
+
+  getHealthRecords: (phone: string): Promise<PetHealthProfile[]> => {
+    return request<PetHealthProfile[]>(`/health-records/${encodeURIComponent(phone)}`)
   },
 }
 

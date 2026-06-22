@@ -163,9 +163,10 @@ class DataStore {
     return pet
   }
 
-  getAppointments(params?: { phone?: string }): Appointment[] {
+  getAppointments(params?: { phone?: string; petId?: number }): Appointment[] {
     return this.appointments.filter((a) => {
       if (params?.phone != null && a.ownerPhone !== params.phone) return false
+      if (params?.petId != null && a.petId !== params.petId) return false
       return true
     }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   }
@@ -196,10 +197,11 @@ class DataStore {
     return apt
   }
 
-  getRegistrations(params?: { doctorId?: number; clinicId?: number }): Registration[] {
+  getRegistrations(params?: { doctorId?: number; clinicId?: number; petId?: number }): Registration[] {
     const filtered = this.registrations.filter((r) => {
       if (params?.doctorId != null && r.doctorId !== params.doctorId) return false
       if (params?.clinicId != null && r.clinicId !== params.clinicId) return false
+      if (params?.petId != null && r.petId !== params.petId) return false
       return true
     })
     return filtered.sort((a, b) => {

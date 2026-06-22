@@ -19,6 +19,7 @@ import appointmentsRoutes from './routes/appointments.js'
 import checkinRoutes from './routes/checkin.js'
 import queueRoutes from './routes/queue.js'
 import petsRoutes from './routes/pets.js'
+import healthRecordsRoutes from './routes/healthRecords.js'
 
 // for esm mode
 const __filename = fileURLToPath(import.meta.url)
@@ -44,6 +45,7 @@ app.use('/api/appointments', appointmentsRoutes)
 app.use('/api/checkin', checkinRoutes)
 app.use('/api/queue', queueRoutes)
 app.use('/api/pets', petsRoutes)
+app.use('/api/health-records', healthRecordsRoutes)
 
 /**
  * health
