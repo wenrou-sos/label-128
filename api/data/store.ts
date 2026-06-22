@@ -195,11 +195,10 @@ class DataStore {
     return apt
   }
 
-  getRegistrations(params?: { doctorId?: number; clinicId?: number; departmentId?: number }): Registration[] {
+  getRegistrations(params?: { doctorId?: number; clinicId?: number }): Registration[] {
     const filtered = this.registrations.filter((r) => {
       if (params?.doctorId != null && r.doctorId !== params.doctorId) return false
       if (params?.clinicId != null && r.clinicId !== params.clinicId) return false
-      if (params?.departmentId != null && r.departmentId !== params.departmentId) return false
       return true
     })
     return filtered.sort((a, b) => {

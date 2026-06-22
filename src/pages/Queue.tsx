@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   RefreshCw,
   AlertTriangle,
@@ -12,14 +12,14 @@ import {
   XCircle,
   ChevronDown,
   Stethoscope,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Layout from '@/components/Layout';
 import { api, type EnrichedRegistration } from '@/lib/api';
-import type { Clinic, Department, Doctor, Registration, Pet } from '../../shared/types';
+import type { Clinic, Department, Doctor, Registration } from '../../shared/types';
 
 type QueueStatus = 'all' | 'waiting' | 'visiting' | 'completed' | 'skipped';
-type ActiveTab = { type: 'all' } | { type: 'department'; id: number } | { type: 'doctor'; id: number };
 
 const statusMap: Record<Registration['status'], { label: string; className: string }> = {
   waiting: { label: '候诊', className: 'bg-blue-50 text-blue-700 border-blue-200' },
@@ -53,17 +53,18 @@ function formatWaitTime(minutes: number) {
 
 interface QueueItemProps {
   reg: EnrichedRegistration;
-  pet?: Pet;
-  onCall: (regNo: string) => void;
-  onComplete: (regNo: string) => void;
-  onSkip: (regNo: string) => void;
-  onToggleEmergency: (regNo: string) => void;
-  processing: boolean;
+  onCall: (no: string) => void;
+  onComplete: (no: string) => void;
+  onSkip: (no: string) => void;
+  onMarkEmergency: (no: string) => void;
+  actingNo?: string | null;
 }
 
-function QueueItem({ reg, pet, onCall, onComplete, onSkip, onToggleEmergency, processing }: QueueItemProps) {
+function QueueItem({ reg, onCall, onComplete, onSkip, onMarkEmergency, actingNo }: QueueItemProps) {
   const status = statusMap[reg.status];
   const visiting = reg.status === 'visiting';
+  const pet = reg.pet;
+  const isActing = actingNo === reg.registrationNo;
 
   return (
     <div
@@ -103,7 +104,7 @@ function QueueItem({ reg, pet, onCall, onComplete, onSkip, onToggleEmergency, pr
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-semibold text-zinc-900 text-base truncate">{pet?.name ?? '未知'}</span>
-          <span className="text-zinc-500">{pet && getSpeciesIcon(pet.species)}</span>
+          {pet && <span className="text-zinc-500">{getSpeciesIcon(pet.species)}</span>}
           <span className="text-xs text-zinc-500 font-mono">{reg.registrationNo}</span>
           <span className={cn('chip border', status.className)}>{status.label}</span>
         </div>
@@ -116,19 +117,20 @@ function QueueItem({ reg, pet, onCall, onComplete, onSkip, onToggleEmergency, pr
       </div>
 
       <div className="flex items-center gap-1.5 flex-shrink-0">
+        {isActing && <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />}
         {reg.status === 'waiting' && (
           <>
             <button
               onClick={() => onCall(reg.registrationNo)}
-              disabled={processing}
+              disabled={isActing}
               className="p-2 rounded-lg text-primary-600 hover:bg-primary-50 transition-colors disabled:opacity-50"
               title="叫号"
             >
-              <Stethoscope className={cn('w-4 h-4', processing && 'animate-pulse')} />
+              <Stethoscope className="w-4 h-4" />
             </button>
             <button
               onClick={() => onSkip(reg.registrationNo)}
-              disabled={processing}
+              disabled={isActing}
               className="p-2 rounded-lg text-zinc-500 hover:bg-zinc-100 transition-colors disabled:opacity-50"
               title="过号"
             >
@@ -139,55 +141,56 @@ function QueueItem({ reg, pet, onCall, onComplete, onSkip, onToggleEmergency, pr
         {reg.status === 'visiting' && (
           <button
             onClick={() => onComplete(reg.registrationNo)}
-            disabled={processing}
+            disabled={isActing}
             className="p-2 rounded-lg text-green-600 hover:bg-green-50 transition-colors disabled:opacity-50"
             title="完成"
           >
             <CheckCircle className="w-4 h-4" />
           </button>
         )}
-        <button
-          onClick={() => onToggleEmergency(reg.registrationNo)}
-          disabled={processing}
-          className={cn(
-            'p-2 rounded-lg transition-colors disabled:opacity-50',
-            reg.isEmergency
-              ? 'text-red-600 bg-red-50'
-              : 'text-zinc-400 hover:text-red-500 hover:bg-red-50'
-          )}
-          title={reg.isEmergency ? '取消急诊' : '标记急诊'}
-        >
-          <AlertTriangle className="w-4 h-4" />
-        </button>
+        {!reg.isEmergency && reg.status === 'waiting' && (
+          <button
+            onClick={() => onMarkEmergency(reg.registrationNo)}
+            disabled={isActing}
+            className="p-2 rounded-lg text-zinc-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50"
+            title="标记急诊"
+          >
+            <AlertTriangle className="w-4 h-4" />
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
 interface DoctorCardProps {
-  doctorId: number;
+  doctor: Doctor;
   registrations: EnrichedRegistration[];
-  onCall: (regNo: string) => void;
-  onComplete: (regNo: string) => void;
-  onSkip: (regNo: string) => void;
-  onToggleEmergency: (regNo: string) => void;
-  processingRegNo: string | null;
+  onCall: (no: string) => void;
+  onComplete: (no: string) => void;
+  onSkip: (no: string) => void;
+  onMarkEmergency: (no: string) => void;
+  actingNo?: string | null;
 }
 
 function DoctorCard({
-  doctorId,
+  doctor,
   registrations,
   onCall,
   onComplete,
   onSkip,
-  onToggleEmergency,
-  processingRegNo,
+  onMarkEmergency,
+  actingNo,
 }: DoctorCardProps) {
-  const doctor = registrations[0]?.doctor;
-  if (!doctor) return null;
-
-  const visiting = registrations.find((r) => r.status === 'visiting');
-  const visitingPet = visiting?.pet;
+  const sorted = [...registrations].sort((a, b) => {
+    const order = { visiting: 0, waiting: 1, skipped: 2, completed: 3 } as const;
+    const sa = order[a.status];
+    const sb = order[b.status];
+    if (sa !== sb) return sa - sb;
+    if (a.isEmergency !== b.isEmergency) return a.isEmergency ? -1 : 1;
+    return a.queueNumber - b.queueNumber;
+  });
+  const visiting = sorted.find((r) => r.status === 'visiting');
 
   return (
     <div className="card overflow-hidden">
@@ -226,17 +229,17 @@ function DoctorCard({
           <div className="mt-4 p-3 rounded-xl bg-primary-50/70 border border-primary-100">
             <div className="text-xs font-medium text-primary-600 mb-1">当前就诊</div>
             <div className="flex items-center gap-2">
-              {visitingPet?.avatar && (
+              {visiting.pet?.avatar && (
                 <img
-                  src={visitingPet.avatar}
-                  alt={visitingPet.name}
+                  src={visiting.pet.avatar}
+                  alt={visiting.pet.name}
                   className="w-9 h-9 rounded-lg object-cover bg-white"
                 />
               )}
               <div className="flex-1">
                 <div className="font-medium text-zinc-900 text-sm flex items-center gap-1.5">
-                  {visitingPet?.name}
-                  {visitingPet && getSpeciesIcon(visitingPet.species, 'w-3.5 h-3.5 text-primary-600')}
+                  {visiting.pet?.name}
+                  {visiting.pet && getSpeciesIcon(visiting.pet.species, 'w-3.5 h-3.5 text-primary-600')}
                 </div>
                 <div className="text-xs text-zinc-500 font-mono">{visiting.registrationNo}</div>
               </div>
@@ -251,30 +254,20 @@ function DoctorCard({
         )}
       </div>
       <div className="p-4 space-y-3">
-        {registrations.length === 0 ? (
+        {sorted.length === 0 ? (
           <div className="py-8 text-center text-sm text-zinc-400">暂无候诊</div>
         ) : (
-          registrations
-            .sort((a, b) => {
-              const order = { visiting: 0, waiting: 1, skipped: 2, completed: 3 } as const;
-              const sa = order[a.status];
-              const sb = order[b.status];
-              if (sa !== sb) return sa - sb;
-              if (a.isEmergency !== b.isEmergency) return a.isEmergency ? -1 : 1;
-              return a.queueNumber - b.queueNumber;
-            })
-            .map((reg) => (
-              <QueueItem
-                key={reg.id}
-                reg={reg}
-                pet={reg.pet}
-                onCall={onCall}
-                onComplete={onComplete}
-                onSkip={onSkip}
-                onToggleEmergency={onToggleEmergency}
-                processing={processingRegNo === reg.registrationNo}
-              />
-            ))
+          sorted.map((reg) => (
+            <QueueItem
+              key={reg.id}
+              reg={reg}
+              onCall={onCall}
+              onComplete={onComplete}
+              onSkip={onSkip}
+              onMarkEmergency={onMarkEmergency}
+              actingNo={actingNo}
+            />
+          ))
         )}
       </div>
     </div>
@@ -282,137 +275,119 @@ function DoctorCard({
 }
 
 export default function Queue() {
-  const [selectedClinic, setSelectedClinic] = useState<number>(1);
-  const [activeTab, setActiveTab] = useState<ActiveTab>({ type: 'all' });
-  const [queueData, setQueueData] = useState<EnrichedRegistration[]>([]);
-  const [statusFilter, setStatusFilter] = useState<QueueStatus>('all');
-  const [refreshing, setRefreshing] = useState(false);
-  const [clinicOpen, setClinicOpen] = useState(false);
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [doctors, setDoctors] = useState<Doctor[]>([]);
-  const [processingRegNo, setProcessingRegNo] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [selectedClinic, setSelectedClinic] = useState<number>(1);
+  const [clinicDoctors, setClinicDoctors] = useState<Doctor[]>([]);
+  const [queueData, setQueueData] = useState<EnrichedRegistration[]>([]);
+  const [activeDoctorTab, setActiveDoctorTab] = useState<'all' | number>('all');
+  const [selectedDept, setSelectedDept] = useState<'all' | number>('all');
+  const [statusFilter, setStatusFilter] = useState<QueueStatus>('all');
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [clinicOpen, setClinicOpen] = useState(false);
+  const [actingNo, setActingNo] = useState<string | null>(null);
+  const [error, setError] = useState('');
 
-  const loadBaseData = async () => {
+  useEffect(() => {
+    api.getClinics()
+      .then((list) => {
+        setClinics(list);
+        if (list.length > 0 && !list.some((c) => c.id === selectedClinic)) {
+          setSelectedClinic(list[0].id);
+        }
+      })
+      .catch(() => {});
+    api.getDepartments().then(setDepartments).catch(() => {});
+  }, []);
+
+  const loadQueue = useCallback(async (clinicId: number) => {
+    setError('');
     try {
-      const [clinicsRes, deptsRes, docsRes] = await Promise.all([
-        api.getClinics(),
-        api.getDepartments(),
-        api.getDoctors({ clinicId: selectedClinic }),
-      ]);
-      setClinics(clinicsRes);
-      setDepartments(deptsRes);
-      setDoctors(docsRes);
-    } catch (e: any) {
-      console.error('Failed to load base data', e);
-    }
-  };
-
-  const loadQueueData = async (showLoading = false) => {
-    if (showLoading) setRefreshing(true);
-    setError(null);
-    try {
-      const params: Parameters<typeof api.getQueue>[0] = { clinicId: selectedClinic };
-      if (activeTab.type === 'doctor') params.doctorId = activeTab.id;
-      if (activeTab.type === 'department') params.departmentId = activeTab.id;
-
-      const data = await api.getQueue(params);
+      const data = await api.getQueue({ clinicId });
       setQueueData(data);
-    } catch (e: any) {
-      setError(e?.message || '获取队列数据失败');
-    } finally {
-      if (showLoading) setRefreshing(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '加载队列失败');
+      setQueueData([]);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadBaseData();
-  }, [selectedClinic]);
+    setLoading(true);
+    Promise.all([
+      api.getDoctors({ clinicId: selectedClinic }).then(setClinicDoctors).catch(() => setClinicDoctors([])),
+      loadQueue(selectedClinic),
+    ]).finally(() => setLoading(false));
+    setActiveDoctorTab('all');
+    setSelectedDept('all');
+  }, [selectedClinic, loadQueue]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadQueue(selectedClinic);
+    setRefreshing(false);
+  }, [selectedClinic, loadQueue]);
 
   useEffect(() => {
-    loadQueueData();
-    const timer = setInterval(() => loadQueueData(), 15000);
+    const timer = setInterval(() => {
+      loadQueue(selectedClinic);
+    }, 15000);
     return () => clearInterval(timer);
-  }, [selectedClinic, activeTab]);
+  }, [selectedClinic, loadQueue]);
 
-  const handleRefresh = () => loadQueueData(true);
-
-  const handleCall = async (regNo: string) => {
-    setProcessingRegNo(regNo);
-    try {
-      await api.callRegistration(regNo);
-      await loadQueueData();
-    } catch (e: any) {
-      setError(e?.message || '叫号失败');
-    } finally {
-      setProcessingRegNo(null);
-    }
-  };
-
-  const handleComplete = async (regNo: string) => {
-    setProcessingRegNo(regNo);
-    try {
-      await api.completeRegistration(regNo);
-      await loadQueueData();
-    } catch (e: any) {
-      setError(e?.message || '完成就诊失败');
-    } finally {
-      setProcessingRegNo(null);
-    }
-  };
-
-  const handleSkip = async (regNo: string) => {
-    setProcessingRegNo(regNo);
-    try {
-      await api.skipRegistration(regNo);
-      await loadQueueData();
-    } catch (e: any) {
-      setError(e?.message || '过号操作失败');
-    } finally {
-      setProcessingRegNo(null);
-    }
-  };
-
-  const handleToggleEmergency = async (regNo: string) => {
-    setProcessingRegNo(regNo);
-    try {
-      await api.markEmergency(regNo);
-      await loadQueueData();
-    } catch (e: any) {
-      setError(e?.message || '标记急诊失败');
-    } finally {
-      setProcessingRegNo(null);
-    }
-  };
-
-  const clinicDoctors = useMemo(
-    () => doctors.filter((d) => d.clinicId === selectedClinic && d.status === 'active'),
-    [doctors, selectedClinic]
+  const runAction = useCallback(
+    async (no: string, action: () => Promise<Registration>) => {
+      setActingNo(no);
+      setError('');
+      try {
+        await action();
+        await loadQueue(selectedClinic);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : '操作失败');
+      } finally {
+        setActingNo(null);
+      }
+    },
+    [selectedClinic, loadQueue],
   );
+
+  const handleCall = useCallback((no: string) => runAction(no, () => api.callRegistration(no)), [runAction]);
+  const handleComplete = useCallback((no: string) => runAction(no, () => api.completeRegistration(no)), [runAction]);
+  const handleSkip = useCallback((no: string) => runAction(no, () => api.skipRegistration(no)), [runAction]);
+  const handleMarkEmergency = useCallback((no: string) => runAction(no, () => api.markEmergency(no)), [runAction]);
+
+  const availableDepts = useMemo(() => {
+    const ids = new Set(clinicDoctors.map((d) => d.departmentId));
+    return departments.filter((d) => ids.has(d.id));
+  }, [clinicDoctors, departments]);
 
   const filteredRegistrations = useMemo(() => {
     return queueData.filter((r) => {
+      if (selectedDept !== 'all') {
+        if (!r.doctor || r.doctor.departmentId !== selectedDept) return false;
+      }
+      if (activeDoctorTab !== 'all' && r.doctorId !== activeDoctorTab) return false;
       if (statusFilter !== 'all' && r.status !== statusFilter) return false;
       return true;
     });
-  }, [queueData, statusFilter]);
+  }, [queueData, selectedDept, activeDoctorTab, statusFilter]);
 
   const groupedByDoctor = useMemo(() => {
-    const map = new Map<number, EnrichedRegistration[]>();
+    const map = new Map<number, { doctor: Doctor; regs: EnrichedRegistration[] }>();
     for (const reg of filteredRegistrations) {
-      if (!map.has(reg.doctorId)) map.set(reg.doctorId, []);
-      map.get(reg.doctorId)!.push(reg);
+      const doc = reg.doctor;
+      if (!doc) continue;
+      if (!map.has(reg.doctorId)) map.set(reg.doctorId, { doctor: doc, regs: [] });
+      map.get(reg.doctorId)!.regs.push(reg);
     }
-    return map;
+    return Array.from(map.values()).sort((a, b) => a.doctor.roomNumber.localeCompare(b.doctor.roomNumber));
   }, [filteredRegistrations]);
 
   const stats = useMemo(() => {
-    const today = queueData;
-    const total = today.length;
-    const visiting = today.filter((r) => r.status === 'visiting').length;
-    const completed = today.filter((r) => r.status === 'completed').length;
-    const waiting = today.filter((r) => r.status === 'waiting');
+    const total = queueData.length;
+    const visiting = queueData.filter((r) => r.status === 'visiting').length;
+    const completed = queueData.filter((r) => r.status === 'completed').length;
+    const waiting = queueData.filter((r) => r.status === 'waiting');
     const avgWait = waiting.length > 0
       ? Math.round(waiting.reduce((s, r) => s + r.estimatedWaitTime, 0) / waiting.length)
       : 0;
@@ -427,47 +402,44 @@ export default function Queue() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="section-title">候诊队列</h1>
-            <p className="subtitle">实时查看各诊室候诊情况</p>
+            <p className="subtitle">实时查看各诊室候诊情况，数据来自后端实时同步</p>
           </div>
-          <button
-            onClick={handleRefresh}
-            className={cn('btn-secondary', refreshing && 'pointer-events-none')}
-          >
+          <button onClick={handleRefresh} className={cn('btn-secondary', refreshing && 'pointer-events-none')}>
             <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
             刷新
           </button>
         </div>
 
         {error && (
-          <div className="mb-4 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-center gap-2 animate-slide-down">
-            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          <div className="mb-4 text-sm text-red-600 flex items-center gap-1.5 bg-red-50 px-4 py-3 rounded-xl border border-red-200">
+            <AlertTriangle className="w-4 h-4" />
             {error}
           </div>
         )}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
-          <div className="card p-4 animate-fade-in-up" style={{ animationDelay: '0ms' }}>
+          <div className="card p-4">
             <div className="text-sm text-zinc-500">今日候诊</div>
             <div className="mt-2 flex items-end gap-2">
               <span className="text-3xl font-bold text-zinc-900">{stats.total}</span>
               <span className="text-sm text-zinc-400 mb-1">位</span>
             </div>
           </div>
-          <div className="card p-4 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
+          <div className="card p-4">
             <div className="text-sm text-zinc-500">就诊中</div>
             <div className="mt-2 flex items-end gap-2">
               <span className="text-3xl font-bold text-primary-600">{stats.visiting}</span>
               <span className="text-sm text-zinc-400 mb-1">位</span>
             </div>
           </div>
-          <div className="card p-4 animate-fade-in-up" style={{ animationDelay: '100ms' }}>
+          <div className="card p-4">
             <div className="text-sm text-zinc-500">已完成</div>
             <div className="mt-2 flex items-end gap-2">
               <span className="text-3xl font-bold text-green-600">{stats.completed}</span>
               <span className="text-sm text-zinc-400 mb-1">位</span>
             </div>
           </div>
-          <div className="card p-4 animate-fade-in-up" style={{ animationDelay: '150ms' }}>
+          <div className="card p-4">
             <div className="text-sm text-zinc-500">平均等待</div>
             <div className="mt-2 flex items-end gap-2">
               <span className="text-3xl font-bold text-accent-600">{stats.avgWait}</span>
@@ -476,7 +448,7 @@ export default function Queue() {
           </div>
         </div>
 
-        <div className="card p-4 mb-6 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
+        <div className="card p-4 mb-6 space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center gap-4">
             <div className="relative">
               <button
@@ -496,7 +468,6 @@ export default function Queue() {
                       key={c.id}
                       onClick={() => {
                         setSelectedClinic(c.id);
-                        setActiveTab({ type: 'all' });
                         setClinicOpen(false);
                       }}
                       className={cn(
@@ -512,66 +483,15 @@ export default function Queue() {
               )}
             </div>
 
-            <div className="flex-1 flex flex-wrap items-center gap-2 overflow-x-auto">
-              <button
-                onClick={() => setActiveTab({ type: 'all' })}
-                className={cn(
-                  'px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
-                  activeTab.type === 'all'
-                    ? 'bg-primary-500 text-white shadow-md'
-                    : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
-                )}
-              >
-                全部
-              </button>
-              {departments.map((dept) => {
-                const hasDoc = clinicDoctors.some((d) => d.departmentId === dept.id);
-                if (!hasDoc) return null;
-                const isActive = activeTab.type === 'department' && activeTab.id === dept.id;
-                return (
-                  <button
-                    key={dept.id}
-                    onClick={() => setActiveTab({ type: 'department', id: dept.id })}
-                    className={cn(
-                      'px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
-                      isActive
-                        ? 'bg-primary-500 text-white shadow-md'
-                        : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
-                    )}
-                  >
-                    {dept.name}
-                  </button>
-                );
-              })}
-              {clinicDoctors.map((doc) => {
-                const isActive = activeTab.type === 'doctor' && activeTab.id === doc.id;
-                return (
-                  <button
-                    key={doc.id}
-                    onClick={() => setActiveTab({ type: 'doctor', id: doc.id })}
-                    className={cn(
-                      'px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
-                      isActive
-                        ? 'bg-primary-500 text-white shadow-md'
-                        : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
-                    )}
-                  >
-                    {doc.name}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-zinc-400">状态：</span>
               {(['all', 'waiting', 'visiting', 'completed', 'skipped'] as QueueStatus[]).map((s) => (
                 <button
                   key={s}
                   onClick={() => setStatusFilter(s)}
                   className={cn(
                     'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
-                    statusFilter === s
-                      ? 'bg-zinc-900 text-white'
-                      : 'text-zinc-500 hover:bg-zinc-100'
+                    statusFilter === s ? 'bg-zinc-900 text-white' : 'text-zinc-500 hover:bg-zinc-100'
                   )}
                 >
                   {s === 'all' ? '全部' : statusMap[s].label}
@@ -579,29 +499,93 @@ export default function Queue() {
               ))}
             </div>
           </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-zinc-400">科室：</span>
+            <button
+              onClick={() => setSelectedDept('all')}
+              className={cn(
+                'px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
+                selectedDept === 'all'
+                  ? 'bg-primary-500 text-white shadow-md'
+                  : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+              )}
+            >
+              全部
+            </button>
+            {availableDepts.map((dept) => (
+              <button
+                key={dept.id}
+                onClick={() => setSelectedDept((prev) => (prev === dept.id ? 'all' : dept.id))}
+                className={cn(
+                  'px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
+                  selectedDept === dept.id
+                    ? 'bg-primary-500 text-white shadow-md'
+                    : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                )}
+              >
+                {dept.name}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-zinc-400">医生：</span>
+            <button
+              onClick={() => setActiveDoctorTab('all')}
+              className={cn(
+                'px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
+                activeDoctorTab === 'all'
+                  ? 'bg-primary-500 text-white shadow-md'
+                  : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+              )}
+            >
+              全部
+            </button>
+            {clinicDoctors.map((doc) => (
+              <button
+                key={doc.id}
+                onClick={() => setActiveDoctorTab((prev) => (prev === doc.id ? 'all' : doc.id))}
+                className={cn(
+                  'px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
+                  activeDoctorTab === doc.id
+                    ? 'bg-primary-500 text-white shadow-md'
+                    : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                )}
+              >
+                {doc.name}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-          {Array.from(groupedByDoctor.keys()).map((doctorId) => (
-            <DoctorCard
-              key={doctorId}
-              doctorId={doctorId}
-              registrations={groupedByDoctor.get(doctorId) ?? []}
-              onCall={handleCall}
-              onComplete={handleComplete}
-              onSkip={handleSkip}
-              onToggleEmergency={handleToggleEmergency}
-              processingRegNo={processingRegNo}
-            />
-          ))}
-          {groupedByDoctor.size === 0 && (
-            <div className="lg:col-span-2 card p-12 text-center">
-              <div className="text-zinc-400 text-5xl mb-4">🐾</div>
-              <div className="text-lg font-medium text-zinc-700">暂无候诊数据</div>
-              <div className="text-sm text-zinc-400 mt-1">请尝试切换筛选条件</div>
-            </div>
-          )}
-        </div>
+        {loading ? (
+          <div className="card p-16 text-center text-zinc-400">
+            <Loader2 className="w-8 h-8 mx-auto mb-3 animate-spin" />
+            加载中...
+          </div>
+        ) : groupedByDoctor.length === 0 ? (
+          <div className="card p-12 text-center">
+            <div className="text-zinc-400 text-5xl mb-4">🐾</div>
+            <div className="text-lg font-medium text-zinc-700">暂无候诊数据</div>
+            <div className="text-sm text-zinc-400 mt-1">请尝试切换筛选条件或前往挂号确认页面签到</div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+            {groupedByDoctor.map(({ doctor, regs }) => (
+              <DoctorCard
+                key={doctor.id}
+                doctor={doctor}
+                registrations={regs}
+                onCall={handleCall}
+                onComplete={handleComplete}
+                onSkip={handleSkip}
+                onMarkEmergency={handleMarkEmergency}
+                actingNo={actingNo}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </Layout>
   );
