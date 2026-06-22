@@ -7,7 +7,8 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const doctorId = req.query.doctorId ? Number(req.query.doctorId) : undefined
     const clinicId = req.query.clinicId ? Number(req.query.clinicId) : undefined
-    const registrations = store.getRegistrations({ doctorId, clinicId })
+    const departmentId = req.query.departmentId ? Number(req.query.departmentId) : undefined
+    const registrations = store.getRegistrations({ doctorId, clinicId, departmentId })
 
     const enriched = await Promise.all(
       registrations.map(async (reg) => {

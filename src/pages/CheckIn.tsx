@@ -17,17 +17,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Layout from '@/components/Layout';
-import {
-  clinics,
-  departments,
-  doctors,
-  pets,
-  appointments,
-  registrations,
-  type Appointment,
-  type Pet,
-  type Registration,
-} from '../../shared/mockData';
+import { api } from '@/lib/api';
+import type { Appointment, Registration, Pet, Doctor, Department, Clinic } from '../../shared/types';
 
 function getSpeciesIcon(species: string, className = 'w-4 h-4') {
   switch (species) {
@@ -44,35 +35,6 @@ function getSpeciesIcon(species: string, className = 'w-4 h-4') {
   }
 }
 
-function getPetById(petId: number): Pet | undefined {
-  return pets.find((p) => p.id === petId);
-}
-
-function getDoctorById(doctorId: number) {
-  return doctors.find((d) => d.id === doctorId);
-}
-
-function getDepartmentById(deptId: number) {
-  return departments.find((d) => d.id === deptId);
-}
-
-function getClinicById(clinicId: number) {
-  return clinics.find((c) => c.id === clinicId);
-}
-
-function getTimeSlotDisplay(appointment: Appointment) {
-  const slots: Record<number, string> = {
-    1: '09:00-09:30',
-    2: '09:30-10:00',
-    200: '14:00-14:30',
-    350: '10:00-10:30',
-    400: '10:30-11:00',
-    500: '14:30-15:00',
-    600: '11:00-11:30',
-  };
-  return slots[appointment.timeSlotId] ?? '09:00-09:30';
-}
-
 function formatDateTime(iso: string) {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -85,25 +47,20 @@ function formatDateOnly(iso: string) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function generateRegNo() {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const datePart = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
-  const rand = String(Math.floor(Math.random() * 9000) + 1000);
-  return `GH${datePart}-${rand}`;
+function getTodayStr() {
+  return formatDateOnly(new Date().toISOString());
 }
 
 interface AppointmentCardProps {
   appointment: Appointment;
+  pet?: Pet;
+  doctor?: Doctor;
+  department?: Department;
   onCheckIn: (apt: Appointment) => void;
+  checkingIn: boolean;
 }
 
-function AppointmentCard({ appointment, onCheckIn }: AppointmentCardProps) {
-  const pet = getPetById(appointment.petId);
-  const doctor = getDoctorById(appointment.doctorId);
-  const department = getDepartmentById(appointment.departmentId);
-  const timeSlot = getTimeSlotDisplay(appointment);
-
+function AppointmentCard({ appointment, pet, doctor, department, onCheckIn, checkingIn }: AppointmentCardProps) {
   const statusMap: Record<Appointment['status'], { label: string; className: string }> = {
     pending: { label: '待确认', className: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
     confirmed: { label: '已确认', className: 'bg-primary-50 text-primary-700 border-primary-200' },
@@ -123,8 +80,8 @@ function AppointmentCard({ appointment, onCheckIn }: AppointmentCardProps) {
           <span className={cn('chip border', status.className)}>{status.label}</span>
         </div>
         <div className="flex items-center gap-1 text-xs text-zinc-500 flex-shrink-0">
-          <Clock className="w-3 h-3" />
-          {timeSlot}
+          <CalendarDays className="w-3 h-3" />
+          {appointment.appointmentDate}
         </div>
       </div>
 
@@ -165,14 +122,14 @@ function AppointmentCard({ appointment, onCheckIn }: AppointmentCardProps) {
       <div className="mt-4 flex justify-end">
         <button
           onClick={() => canCheckIn && onCheckIn(appointment)}
-          disabled={!canCheckIn}
+          disabled={!canCheckIn || checkingIn}
           className={cn(
             'btn-primary text-sm',
-            !canCheckIn && 'opacity-50 cursor-not-allowed'
+            (!canCheckIn || checkingIn) && 'opacity-50 cursor-not-allowed'
           )}
         >
           <CheckCircle className="w-4 h-4" />
-          确认到店
+          {checkingIn ? '确认中...' : '确认到店'}
         </button>
       </div>
     </div>
@@ -182,15 +139,13 @@ function AppointmentCard({ appointment, onCheckIn }: AppointmentCardProps) {
 interface TicketProps {
   registration: Registration;
   appointment: Appointment;
+  pet?: Pet;
+  doctor?: Doctor;
+  department?: Department;
+  clinic?: Clinic;
 }
 
-function Ticket({ registration, appointment }: TicketProps) {
-  const pet = getPetById(appointment.petId);
-  const doctor = getDoctorById(appointment.doctorId);
-  const department = getDepartmentById(appointment.departmentId);
-  const clinic = getClinicById(appointment.clinicId);
-  const timeSlot = getTimeSlotDisplay(appointment);
-
+function Ticket({ registration, appointment, pet, doctor, department, clinic }: TicketProps) {
   return (
     <div className="ticket rounded-2xl p-6 md:p-8 shadow-card">
       <div className="text-center pb-5 border-b border-dashed border-zinc-200">
@@ -261,11 +216,11 @@ function Ticket({ registration, appointment }: TicketProps) {
         </div>
         <div className="w-px h-16 bg-zinc-200" />
         <div className="text-center">
-          <div className="text-xs text-zinc-400">预约时段</div>
-          <div className="mt-2 text-lg font-semibold text-zinc-900">{timeSlot}</div>
+          <div className="text-xs text-zinc-400">预约日期</div>
+          <div className="mt-2 text-lg font-semibold text-zinc-900">{appointment.appointmentDate}</div>
           <div className="mt-1 text-xs text-zinc-400 flex items-center justify-center gap-1">
-            <CalendarDays className="w-3 h-3" />
-            {formatDateOnly(appointment.appointmentDate)}
+            <Clock className="w-3 h-3" />
+            已确认到店
           </div>
         </div>
       </div>
@@ -311,56 +266,70 @@ function Ticket({ registration, appointment }: TicketProps) {
 export default function CheckIn() {
   const [phone, setPhone] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [checkedInRegistration, setCheckedInRegistration] = useState<{
-    reg: Registration;
-    apt: Appointment;
+  const [searching, setSearching] = useState(false);
+  const [checkingInId, setCheckingInId] = useState<number | null>(null);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [pets, setPets] = useState<Pet[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [clinics, setClinics] = useState<Clinic[]>([]);
+  const [checkedInData, setCheckedInData] = useState<{
+    registration: Registration;
+    appointment: Appointment;
+    pet: Pet;
+    doctor: Doctor;
   } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
+  const today = getTodayStr();
   const filteredAppointments = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-    const today = formatDateOnly(new Date().toISOString());
-    return appointments.filter((apt) => {
-      if (apt.ownerPhone !== searchQuery.trim()) return false;
-      if (apt.appointmentDate !== today) return false;
-      return true;
-    });
-  }, [searchQuery]);
+    return appointments.filter((apt) => apt.appointmentDate === today);
+  }, [appointments, today]);
 
-  const handleSearch = () => {
-    setSearchQuery(phone);
+  const getPetById = (id: number) => pets.find((p) => p.id === id);
+  const getDoctorById = (id: number) => doctors.find((d) => d.id === id);
+  const getDepartmentById = (id: number) => departments.find((d) => d.id === id);
+  const getClinicById = (id: number) => clinics.find((c) => c.id === id);
+
+  const handleSearch = async () => {
+    const q = phone.trim();
+    if (!q) return;
+    setSearching(true);
+    setError(null);
+    setCheckedInData(null);
+    try {
+      const [aptRes, petsRes, docsRes, deptsRes, clinicsRes] = await Promise.all([
+        api.getAppointments(q),
+        api.getPets(q),
+        api.getDoctors(),
+        api.getDepartments(),
+        api.getClinics(),
+      ]);
+      setAppointments(aptRes);
+      setPets(petsRes);
+      setDoctors(docsRes);
+      setDepartments(deptsRes);
+      setClinics(clinicsRes);
+      setSearchQuery(q);
+    } catch (e: any) {
+      setError(e?.message || '查询失败');
+      setAppointments([]);
+    } finally {
+      setSearching(false);
+    }
   };
 
-  const handleCheckIn = (apt: Appointment) => {
-    const existingReg = registrations.find((r) => r.appointmentId === apt.id);
-    if (existingReg) {
-      setCheckedInRegistration({ reg: existingReg, apt });
-      return;
+  const handleCheckIn = async (apt: Appointment) => {
+    setCheckingInId(apt.id);
+    setError(null);
+    try {
+      const result = await api.checkIn({ appointmentId: apt.id });
+      setCheckedInData(result);
+    } catch (e: any) {
+      setError(e?.message || '签到失败');
+    } finally {
+      setCheckingInId(null);
     }
-
-    const doctor = getDoctorById(apt.doctorId);
-    const sameDeptQueue = registrations.filter(
-      (r) => r.doctorId === apt.doctorId
-    );
-    const newQueueNumber = sameDeptQueue.length > 0
-      ? Math.max(...sameDeptQueue.map((r) => r.queueNumber)) + 1
-      : 1;
-
-    const newReg: Registration = {
-      id: Date.now(),
-      registrationNo: generateRegNo(),
-      appointmentId: apt.id,
-      petId: apt.petId,
-      clinicId: apt.clinicId,
-      departmentId: apt.departmentId,
-      doctorId: apt.doctorId,
-      roomNumber: doctor?.roomNumber ?? '101',
-      queueNumber: newQueueNumber,
-      isEmergency: false,
-      estimatedWaitTime: (newQueueNumber - 1) * 20,
-      status: 'waiting',
-      checkedInAt: new Date().toISOString(),
-    };
-    setCheckedInRegistration({ reg: newReg, apt });
   };
 
   return (
@@ -370,6 +339,13 @@ export default function CheckIn() {
           <h1 className="section-title">挂号确认</h1>
           <p className="subtitle">查询预约并完成到店确认</p>
         </div>
+
+        {error && (
+          <div className="mb-4 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            {error}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           <div className="lg:col-span-2 space-y-4">
@@ -388,9 +364,9 @@ export default function CheckIn() {
                     className="input pl-10"
                   />
                 </div>
-                <button onClick={handleSearch} className="btn-primary">
-                  <Search className="w-4 h-4" />
-                  查询
+                <button onClick={handleSearch} disabled={searching} className="btn-primary">
+                  <Search className={cn('w-4 h-4', searching && 'animate-spin')} />
+                  {searching ? '查询中' : '查询'}
                 </button>
               </div>
               <div className="mt-3 text-xs text-zinc-400 flex items-center gap-1.5">
@@ -406,7 +382,7 @@ export default function CheckIn() {
                   <span className="text-sm text-zinc-400">共 {filteredAppointments.length} 条</span>
                 </div>
                 {filteredAppointments.length === 0 ? (
-                  <div className="card p-12 text-center">
+                  <div className="card p-12 text-center animate-fade-in-up">
                     <div className="text-5xl mb-3">📅</div>
                     <div className="text-lg font-medium text-zinc-700">暂无今日预约</div>
                     <div className="text-sm text-zinc-400 mt-1">请检查手机号是否正确</div>
@@ -414,7 +390,15 @@ export default function CheckIn() {
                 ) : (
                   <div className="space-y-3">
                     {filteredAppointments.map((apt) => (
-                      <AppointmentCard key={apt.id} appointment={apt} onCheckIn={handleCheckIn} />
+                      <AppointmentCard
+                        key={apt.id}
+                        appointment={apt}
+                        pet={getPetById(apt.petId)}
+                        doctor={getDoctorById(apt.doctorId)}
+                        department={getDepartmentById(apt.departmentId)}
+                        onCheckIn={handleCheckIn}
+                        checkingIn={checkingInId === apt.id}
+                      />
                     ))}
                   </div>
                 )}
@@ -424,15 +408,19 @@ export default function CheckIn() {
 
           <div className="lg:col-span-3">
             <div className="lg:sticky lg:top-6">
-              {checkedInRegistration ? (
-                <div className="space-y-4">
+              {checkedInData ? (
+                <div className="space-y-4 animate-slide-down">
                   <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 px-4 py-3 rounded-xl border border-green-200">
                     <CheckCircle className="w-5 h-5 flex-shrink-0" />
                     <span>到店确认成功！以下是挂号凭证</span>
                   </div>
                   <Ticket
-                    registration={checkedInRegistration.reg}
-                    appointment={checkedInRegistration.apt}
+                    registration={checkedInData.registration}
+                    appointment={checkedInData.appointment}
+                    pet={checkedInData.pet}
+                    doctor={checkedInData.doctor}
+                    department={getDepartmentById(checkedInData.appointment.departmentId)}
+                    clinic={getClinicById(checkedInData.appointment.clinicId)}
                   />
                 </div>
               ) : (

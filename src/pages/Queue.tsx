@@ -15,17 +15,11 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Layout from '@/components/Layout';
-import {
-  clinics,
-  departments,
-  doctors,
-  pets,
-  registrations as mockRegistrations,
-  type Registration,
-  type Pet,
-} from '../../shared/mockData';
+import { api, type EnrichedRegistration } from '@/lib/api';
+import type { Clinic, Department, Doctor, Registration, Pet } from '../../shared/types';
 
 type QueueStatus = 'all' | 'waiting' | 'visiting' | 'completed' | 'skipped';
+type ActiveTab = { type: 'all' } | { type: 'department'; id: number } | { type: 'doctor'; id: number };
 
 const statusMap: Record<Registration['status'], { label: string; className: string }> = {
   waiting: { label: '候诊', className: 'bg-blue-50 text-blue-700 border-blue-200' },
@@ -49,10 +43,6 @@ function getSpeciesIcon(species: string, className = 'w-4 h-4') {
   }
 }
 
-function getPetById(petId: number): Pet | undefined {
-  return pets.find((p) => p.id === petId);
-}
-
 function formatWaitTime(minutes: number) {
   if (minutes <= 0) return '即将就诊';
   if (minutes < 60) return `约${minutes}分钟`;
@@ -62,15 +52,16 @@ function formatWaitTime(minutes: number) {
 }
 
 interface QueueItemProps {
-  reg: Registration;
+  reg: EnrichedRegistration;
   pet?: Pet;
-  onCall: (id: number) => void;
-  onComplete: (id: number) => void;
-  onSkip: (id: number) => void;
-  onToggleEmergency: (id: number) => void;
+  onCall: (regNo: string) => void;
+  onComplete: (regNo: string) => void;
+  onSkip: (regNo: string) => void;
+  onToggleEmergency: (regNo: string) => void;
+  processing: boolean;
 }
 
-function QueueItem({ reg, pet, onCall, onComplete, onSkip, onToggleEmergency }: QueueItemProps) {
+function QueueItem({ reg, pet, onCall, onComplete, onSkip, onToggleEmergency, processing }: QueueItemProps) {
   const status = statusMap[reg.status];
   const visiting = reg.status === 'visiting';
 
@@ -112,16 +103,9 @@ function QueueItem({ reg, pet, onCall, onComplete, onSkip, onToggleEmergency }: 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-semibold text-zinc-900 text-base truncate">{pet?.name ?? '未知'}</span>
-          <span className="text-zinc-500">{getSpeciesIcon(pet?.species ?? '')}</span>
+          <span className="text-zinc-500">{pet && getSpeciesIcon(pet.species)}</span>
           <span className="text-xs text-zinc-500 font-mono">{reg.registrationNo}</span>
-          <span
-            className={cn(
-              'chip border',
-              status.className
-            )}
-          >
-            {status.label}
-          </span>
+          <span className={cn('chip border', status.className)}>{status.label}</span>
         </div>
         <div className="mt-1.5 flex items-center gap-3 text-sm text-zinc-500">
           <span className="inline-flex items-center gap-1">
@@ -135,15 +119,17 @@ function QueueItem({ reg, pet, onCall, onComplete, onSkip, onToggleEmergency }: 
         {reg.status === 'waiting' && (
           <>
             <button
-              onClick={() => onCall(reg.id)}
-              className="p-2 rounded-lg text-primary-600 hover:bg-primary-50 transition-colors"
+              onClick={() => onCall(reg.registrationNo)}
+              disabled={processing}
+              className="p-2 rounded-lg text-primary-600 hover:bg-primary-50 transition-colors disabled:opacity-50"
               title="叫号"
             >
-              <Stethoscope className="w-4 h-4" />
+              <Stethoscope className={cn('w-4 h-4', processing && 'animate-pulse')} />
             </button>
             <button
-              onClick={() => onSkip(reg.id)}
-              className="p-2 rounded-lg text-zinc-500 hover:bg-zinc-100 transition-colors"
+              onClick={() => onSkip(reg.registrationNo)}
+              disabled={processing}
+              className="p-2 rounded-lg text-zinc-500 hover:bg-zinc-100 transition-colors disabled:opacity-50"
               title="过号"
             >
               <XCircle className="w-4 h-4" />
@@ -152,17 +138,19 @@ function QueueItem({ reg, pet, onCall, onComplete, onSkip, onToggleEmergency }: 
         )}
         {reg.status === 'visiting' && (
           <button
-            onClick={() => onComplete(reg.id)}
-            className="p-2 rounded-lg text-green-600 hover:bg-green-50 transition-colors"
+            onClick={() => onComplete(reg.registrationNo)}
+            disabled={processing}
+            className="p-2 rounded-lg text-green-600 hover:bg-green-50 transition-colors disabled:opacity-50"
             title="完成"
           >
             <CheckCircle className="w-4 h-4" />
           </button>
         )}
         <button
-          onClick={() => onToggleEmergency(reg.id)}
+          onClick={() => onToggleEmergency(reg.registrationNo)}
+          disabled={processing}
           className={cn(
-            'p-2 rounded-lg transition-colors',
+            'p-2 rounded-lg transition-colors disabled:opacity-50',
             reg.isEmergency
               ? 'text-red-600 bg-red-50'
               : 'text-zinc-400 hover:text-red-500 hover:bg-red-50'
@@ -178,11 +166,12 @@ function QueueItem({ reg, pet, onCall, onComplete, onSkip, onToggleEmergency }: 
 
 interface DoctorCardProps {
   doctorId: number;
-  registrations: Registration[];
-  onCall: (id: number) => void;
-  onComplete: (id: number) => void;
-  onSkip: (id: number) => void;
-  onToggleEmergency: (id: number) => void;
+  registrations: EnrichedRegistration[];
+  onCall: (regNo: string) => void;
+  onComplete: (regNo: string) => void;
+  onSkip: (regNo: string) => void;
+  onToggleEmergency: (regNo: string) => void;
+  processingRegNo: string | null;
 }
 
 function DoctorCard({
@@ -192,12 +181,13 @@ function DoctorCard({
   onComplete,
   onSkip,
   onToggleEmergency,
+  processingRegNo,
 }: DoctorCardProps) {
-  const doctor = doctors.find((d) => d.id === doctorId);
+  const doctor = registrations[0]?.doctor;
   if (!doctor) return null;
 
   const visiting = registrations.find((r) => r.status === 'visiting');
-  const visitingPet = visiting ? getPetById(visiting.petId) : undefined;
+  const visitingPet = visiting?.pet;
 
   return (
     <div className="card overflow-hidden">
@@ -277,11 +267,12 @@ function DoctorCard({
               <QueueItem
                 key={reg.id}
                 reg={reg}
-                pet={getPetById(reg.petId)}
+                pet={reg.pet}
                 onCall={onCall}
                 onComplete={onComplete}
                 onSkip={onSkip}
                 onToggleEmergency={onToggleEmergency}
+                processing={processingRegNo === reg.registrationNo}
               />
             ))
         )}
@@ -292,71 +283,123 @@ function DoctorCard({
 
 export default function Queue() {
   const [selectedClinic, setSelectedClinic] = useState<number>(1);
-  const [activeTab, setActiveTab] = useState<'all' | number>('all');
-  const [queueData, setQueueData] = useState<Registration[]>(mockRegistrations);
+  const [activeTab, setActiveTab] = useState<ActiveTab>({ type: 'all' });
+  const [queueData, setQueueData] = useState<EnrichedRegistration[]>([]);
   const [statusFilter, setStatusFilter] = useState<QueueStatus>('all');
   const [refreshing, setRefreshing] = useState(false);
   const [clinicOpen, setClinicOpen] = useState(false);
+  const [clinics, setClinics] = useState<Clinic[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [processingRegNo, setProcessingRegNo] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleRefresh = () => {
-    setRefreshing(true);
-    setTimeout(() => {
-      setQueueData([...mockRegistrations]);
-      setRefreshing(false);
-    }, 600);
+  const loadBaseData = async () => {
+    try {
+      const [clinicsRes, deptsRes, docsRes] = await Promise.all([
+        api.getClinics(),
+        api.getDepartments(),
+        api.getDoctors({ clinicId: selectedClinic }),
+      ]);
+      setClinics(clinicsRes);
+      setDepartments(deptsRes);
+      setDoctors(docsRes);
+    } catch (e: any) {
+      console.error('Failed to load base data', e);
+    }
+  };
+
+  const loadQueueData = async (showLoading = false) => {
+    if (showLoading) setRefreshing(true);
+    setError(null);
+    try {
+      const params: Parameters<typeof api.getQueue>[0] = { clinicId: selectedClinic };
+      if (activeTab.type === 'doctor') params.doctorId = activeTab.id;
+      if (activeTab.type === 'department') params.departmentId = activeTab.id;
+
+      const data = await api.getQueue(params);
+      setQueueData(data);
+    } catch (e: any) {
+      setError(e?.message || '获取队列数据失败');
+    } finally {
+      if (showLoading) setRefreshing(false);
+    }
   };
 
   useEffect(() => {
-    const timer = setInterval(handleRefresh, 15000);
+    loadBaseData();
+  }, [selectedClinic]);
+
+  useEffect(() => {
+    loadQueueData();
+    const timer = setInterval(() => loadQueueData(), 15000);
     return () => clearInterval(timer);
-  }, []);
+  }, [selectedClinic, activeTab]);
 
-  const handleCall = (id: number) => {
-    setQueueData((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? { ...r, status: 'visiting', calledAt: new Date().toISOString(), estimatedWaitTime: 0 }
-          : r
-      )
-    );
+  const handleRefresh = () => loadQueueData(true);
+
+  const handleCall = async (regNo: string) => {
+    setProcessingRegNo(regNo);
+    try {
+      await api.callRegistration(regNo);
+      await loadQueueData();
+    } catch (e: any) {
+      setError(e?.message || '叫号失败');
+    } finally {
+      setProcessingRegNo(null);
+    }
   };
 
-  const handleComplete = (id: number) => {
-    setQueueData((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? { ...r, status: 'completed', completedAt: new Date().toISOString() }
-          : r
-      )
-    );
+  const handleComplete = async (regNo: string) => {
+    setProcessingRegNo(regNo);
+    try {
+      await api.completeRegistration(regNo);
+      await loadQueueData();
+    } catch (e: any) {
+      setError(e?.message || '完成就诊失败');
+    } finally {
+      setProcessingRegNo(null);
+    }
   };
 
-  const handleSkip = (id: number) => {
-    setQueueData((prev) => prev.map((r) => (r.id === id ? { ...r, status: 'skipped' } : r)));
+  const handleSkip = async (regNo: string) => {
+    setProcessingRegNo(regNo);
+    try {
+      await api.skipRegistration(regNo);
+      await loadQueueData();
+    } catch (e: any) {
+      setError(e?.message || '过号操作失败');
+    } finally {
+      setProcessingRegNo(null);
+    }
   };
 
-  const handleToggleEmergency = (id: number) => {
-    setQueueData((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, isEmergency: !r.isEmergency } : r))
-    );
+  const handleToggleEmergency = async (regNo: string) => {
+    setProcessingRegNo(regNo);
+    try {
+      await api.markEmergency(regNo);
+      await loadQueueData();
+    } catch (e: any) {
+      setError(e?.message || '标记急诊失败');
+    } finally {
+      setProcessingRegNo(null);
+    }
   };
 
   const clinicDoctors = useMemo(
     () => doctors.filter((d) => d.clinicId === selectedClinic && d.status === 'active'),
-    [selectedClinic]
+    [doctors, selectedClinic]
   );
 
   const filteredRegistrations = useMemo(() => {
     return queueData.filter((r) => {
-      if (r.clinicId !== selectedClinic) return false;
-      if (activeTab !== 'all' && r.doctorId !== activeTab) return false;
       if (statusFilter !== 'all' && r.status !== statusFilter) return false;
       return true;
     });
-  }, [queueData, selectedClinic, activeTab, statusFilter]);
+  }, [queueData, statusFilter]);
 
   const groupedByDoctor = useMemo(() => {
-    const map = new Map<number, Registration[]>();
+    const map = new Map<number, EnrichedRegistration[]>();
     for (const reg of filteredRegistrations) {
       if (!map.has(reg.doctorId)) map.set(reg.doctorId, []);
       map.get(reg.doctorId)!.push(reg);
@@ -365,7 +408,7 @@ export default function Queue() {
   }, [filteredRegistrations]);
 
   const stats = useMemo(() => {
-    const today = queueData.filter((r) => r.clinicId === selectedClinic);
+    const today = queueData;
     const total = today.length;
     const visiting = today.filter((r) => r.status === 'visiting').length;
     const completed = today.filter((r) => r.status === 'completed').length;
@@ -374,7 +417,7 @@ export default function Queue() {
       ? Math.round(waiting.reduce((s, r) => s + r.estimatedWaitTime, 0) / waiting.length)
       : 0;
     return { total, visiting, completed, avgWait };
-  }, [queueData, selectedClinic]);
+  }, [queueData]);
 
   const currentClinic = clinics.find((c) => c.id === selectedClinic);
 
@@ -388,39 +431,43 @@ export default function Queue() {
           </div>
           <button
             onClick={handleRefresh}
-            className={cn(
-              'btn-secondary',
-              refreshing && 'pointer-events-none'
-            )}
+            className={cn('btn-secondary', refreshing && 'pointer-events-none')}
           >
             <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
             刷新
           </button>
         </div>
 
+        {error && (
+          <div className="mb-4 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-center gap-2 animate-slide-down">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            {error}
+          </div>
+        )}
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
-          <div className="card p-4">
+          <div className="card p-4 animate-fade-in-up" style={{ animationDelay: '0ms' }}>
             <div className="text-sm text-zinc-500">今日候诊</div>
             <div className="mt-2 flex items-end gap-2">
               <span className="text-3xl font-bold text-zinc-900">{stats.total}</span>
               <span className="text-sm text-zinc-400 mb-1">位</span>
             </div>
           </div>
-          <div className="card p-4">
+          <div className="card p-4 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
             <div className="text-sm text-zinc-500">就诊中</div>
             <div className="mt-2 flex items-end gap-2">
               <span className="text-3xl font-bold text-primary-600">{stats.visiting}</span>
               <span className="text-sm text-zinc-400 mb-1">位</span>
             </div>
           </div>
-          <div className="card p-4">
+          <div className="card p-4 animate-fade-in-up" style={{ animationDelay: '100ms' }}>
             <div className="text-sm text-zinc-500">已完成</div>
             <div className="mt-2 flex items-end gap-2">
               <span className="text-3xl font-bold text-green-600">{stats.completed}</span>
               <span className="text-sm text-zinc-400 mb-1">位</span>
             </div>
           </div>
-          <div className="card p-4">
+          <div className="card p-4 animate-fade-in-up" style={{ animationDelay: '150ms' }}>
             <div className="text-sm text-zinc-500">平均等待</div>
             <div className="mt-2 flex items-end gap-2">
               <span className="text-3xl font-bold text-accent-600">{stats.avgWait}</span>
@@ -429,7 +476,7 @@ export default function Queue() {
           </div>
         </div>
 
-        <div className="card p-4 mb-6">
+        <div className="card p-4 mb-6 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
           <div className="flex flex-col sm:flex-row sm:items-center gap-4">
             <div className="relative">
               <button
@@ -449,6 +496,7 @@ export default function Queue() {
                       key={c.id}
                       onClick={() => {
                         setSelectedClinic(c.id);
+                        setActiveTab({ type: 'all' });
                         setClinicOpen(false);
                       }}
                       className={cn(
@@ -466,10 +514,10 @@ export default function Queue() {
 
             <div className="flex-1 flex flex-wrap items-center gap-2 overflow-x-auto">
               <button
-                onClick={() => setActiveTab('all')}
+                onClick={() => setActiveTab({ type: 'all' })}
                 className={cn(
                   'px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
-                  activeTab === 'all'
+                  activeTab.type === 'all'
                     ? 'bg-primary-500 text-white shadow-md'
                     : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
                 )}
@@ -479,30 +527,39 @@ export default function Queue() {
               {departments.map((dept) => {
                 const hasDoc = clinicDoctors.some((d) => d.departmentId === dept.id);
                 if (!hasDoc) return null;
+                const isActive = activeTab.type === 'department' && activeTab.id === dept.id;
                 return (
                   <button
                     key={dept.id}
-                    onClick={() => setActiveTab('all')}
-                    className="px-4 py-2 rounded-full text-sm font-medium bg-zinc-100 text-zinc-600 hover:bg-zinc-200 transition-colors whitespace-nowrap"
+                    onClick={() => setActiveTab({ type: 'department', id: dept.id })}
+                    className={cn(
+                      'px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
+                      isActive
+                        ? 'bg-primary-500 text-white shadow-md'
+                        : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                    )}
                   >
                     {dept.name}
                   </button>
                 );
               })}
-              {clinicDoctors.map((doc) => (
-                <button
-                  key={doc.id}
-                  onClick={() => setActiveTab(doc.id)}
-                  className={cn(
-                    'px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
-                    activeTab === doc.id
-                      ? 'bg-primary-500 text-white shadow-md'
-                      : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
-                  )}
-                >
-                  {doc.name}
-                </button>
-              ))}
+              {clinicDoctors.map((doc) => {
+                const isActive = activeTab.type === 'doctor' && activeTab.id === doc.id;
+                return (
+                  <button
+                    key={doc.id}
+                    onClick={() => setActiveTab({ type: 'doctor', id: doc.id })}
+                    className={cn(
+                      'px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
+                      isActive
+                        ? 'bg-primary-500 text-white shadow-md'
+                        : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                    )}
+                  >
+                    {doc.name}
+                  </button>
+                );
+              })}
             </div>
 
             <div className="flex items-center gap-2">
@@ -525,29 +582,18 @@ export default function Queue() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-          {activeTab === 'all'
-            ? Array.from(groupedByDoctor.keys()).map((doctorId) => (
-                <DoctorCard
-                  key={doctorId}
-                  doctorId={doctorId}
-                  registrations={groupedByDoctor.get(doctorId) ?? []}
-                  onCall={handleCall}
-                  onComplete={handleComplete}
-                  onSkip={handleSkip}
-                  onToggleEmergency={handleToggleEmergency}
-                />
-              ))
-            : Array.from(groupedByDoctor.keys()).map((doctorId) => (
-                <DoctorCard
-                  key={doctorId}
-                  doctorId={doctorId}
-                  registrations={groupedByDoctor.get(doctorId) ?? []}
-                  onCall={handleCall}
-                  onComplete={handleComplete}
-                  onSkip={handleSkip}
-                  onToggleEmergency={handleToggleEmergency}
-                />
-              ))}
+          {Array.from(groupedByDoctor.keys()).map((doctorId) => (
+            <DoctorCard
+              key={doctorId}
+              doctorId={doctorId}
+              registrations={groupedByDoctor.get(doctorId) ?? []}
+              onCall={handleCall}
+              onComplete={handleComplete}
+              onSkip={handleSkip}
+              onToggleEmergency={handleToggleEmergency}
+              processingRegNo={processingRegNo}
+            />
+          ))}
           {groupedByDoctor.size === 0 && (
             <div className="lg:col-span-2 card p-12 text-center">
               <div className="text-zinc-400 text-5xl mb-4">🐾</div>

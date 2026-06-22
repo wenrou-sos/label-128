@@ -87,6 +87,7 @@ export interface CheckInData {
 export interface GetQueueParams {
   doctorId?: number
   clinicId?: number
+  departmentId?: number
 }
 
 export interface CreatePetData {
@@ -176,6 +177,9 @@ export const api = {
     }
     if (params.clinicId !== undefined) {
       searchParams.append('clinicId', String(params.clinicId))
+    }
+    if (params.departmentId !== undefined) {
+      searchParams.append('departmentId', String(params.departmentId))
     }
     const query = searchParams.toString()
     return request<EnrichedRegistration[]>(`/queue${query ? `?${query}` : ''}`)
