@@ -173,7 +173,7 @@ function generateTimeSlots(): TimeSlot[] {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  for (let dayOffset = 0; dayOffset < 3; dayOffset++) {
+  for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
     const date = formatDate(addDays(today, dayOffset));
     for (const doctor of doctors) {
       const morningSlots = [

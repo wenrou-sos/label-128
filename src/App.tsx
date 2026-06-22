@@ -4,6 +4,8 @@ import Appointment from "@/pages/Appointment";
 import AppointmentSuccess from "@/pages/AppointmentSuccess";
 import Queue from "@/pages/Queue";
 import CheckIn from "@/pages/CheckIn";
+import Doctors from "@/pages/Doctors";
+import DoctorSchedule from "@/pages/DoctorSchedule";
 
 export default function App() {
   return (
@@ -14,6 +16,8 @@ export default function App() {
         <Route path="/appointment/success" element={<AppointmentSuccess />} />
         <Route path="/queue" element={<Queue />} />
         <Route path="/checkin" element={<CheckIn />} />
+        <Route path="/doctors" element={<Doctors />} />
+        <Route path="/doctors/:id" element={<DoctorSchedule />} />
       </Routes>
     </Router>
   );

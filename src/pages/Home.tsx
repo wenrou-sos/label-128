@@ -66,7 +66,7 @@ const quickActions = [
   { label: "候诊队列", icon: Users, path: "/queue", color: "accent" },
   { label: "挂号确认", icon: ClipboardCheck, path: "/checkin", color: "emerald" },
   { label: "分院管理", icon: Building2, path: "#", color: "violet" },
-  { label: "医生排班", icon: Clock, path: "#", color: "blue" },
+  { label: "医生排班", icon: Clock, path: "/doctors", color: "blue" },
   { label: "宠物档案", icon: Dog, path: "#", color: "amber" },
 ];
 
